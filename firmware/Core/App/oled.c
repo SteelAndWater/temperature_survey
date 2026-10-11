@@ -1,0 +1,191 @@
+#include "oled.h"
+#include <string.h>
+
+#define OLED_I2C_TIMEOUT_MS   20U
+#define OLED_SEGMENT_REMAP    0xA1U
+#define OLED_COM_SCAN         0xC8U /* Use 0xC0 only if vertically mirrored. */
+
+static uint8_t framebuffer[8][128];
+static I2C_HandleTypeDef *oled_i2c = NULL;
+static uint16_t oled_address = 0U;
+volatile uint32_t oled_i2c_errors = 0;
+
+static HAL_StatusTypeDef OLED_WriteCmd(uint8_t cmd)
+{
+    uint8_t buf[2] = {0x00U, cmd};
+    if (oled_i2c == NULL) return HAL_ERROR;
+    HAL_StatusTypeDef result = HAL_I2C_Master_Transmit(
+        oled_i2c, oled_address, buf, sizeof(buf), OLED_I2C_TIMEOUT_MS);
+    if (result != HAL_OK) oled_i2c_errors++;
+    return result;
+}
+
+void OLED_Init(I2C_HandleTypeDef *i2c, uint8_t address_7bit)
+{
+    static const uint8_t commands[] = {
+        0xAE, 0xD5, 0x80, 0xA8, 0x3F, 0xD3, 0x00, 0x40,
+        0x8D, 0x14, 0x20, 0x02, /* Page addressing matches OLED_Update. */
+        OLED_SEGMENT_REMAP, OLED_COM_SCAN, 0xDA, 0x12,
+        0x81, 0xCF, 0xD9, 0xF1, 0xDB, 0x40, 0xA4, 0xA6, 0xAF
+    };
+    uint32_t i;
+    if (i2c == NULL || address_7bit > 0x7FU) return;
+    oled_i2c = i2c;
+    oled_address = (uint16_t)address_7bit << 1;
+    HAL_Delay(100U);
+    for (i = 0; i < sizeof(commands); ++i) {
+        if (OLED_WriteCmd(commands[i]) != HAL_OK) return;
+    }
+    OLED_Clear();
+    OLED_Update();
+}
+
+void OLED_Clear(void)
+{
+    memset(framebuffer, 0, sizeof(framebuffer));
+}
+
+void OLED_Update(void)
+{
+    uint8_t packet[129];
+    uint8_t page;
+    if (oled_i2c == NULL) return;
+    packet[0] = 0x40U; /* One control byte followed by a whole page. */
+    for (page = 0; page < 8U; ++page) {
+        if (OLED_WriteCmd((uint8_t)(0xB0U + page)) != HAL_OK ||
+            OLED_WriteCmd(0x00U) != HAL_OK ||
+            OLED_WriteCmd(0x10U) != HAL_OK) return;
+        memcpy(&packet[1], framebuffer[page], 128U);
+        if (HAL_I2C_Master_Transmit(oled_i2c, oled_address, packet,
+                                  sizeof(packet), OLED_I2C_TIMEOUT_MS) != HAL_OK) {
+            oled_i2c_errors++;
+            return;
+        }
+    }
+}
+
+/* 5x7 column font, bit 0 at the top; expanded 2x for clear 10x14 text. */
+typedef struct { char c; uint8_t col[5]; } OLED_Glyph;
+static const OLED_Glyph font[] = {
+    {'0',{0x3E,0x51,0x49,0x45,0x3E}}, {'1',{0,0x42,0x7F,0x40,0}},
+    {'2',{0x42,0x61,0x51,0x49,0x46}}, {'3',{0x21,0x41,0x45,0x4B,0x31}},
+    {'4',{0x18,0x14,0x12,0x7F,0x10}}, {'5',{0x27,0x45,0x45,0x45,0x39}},
+    {'6',{0x3C,0x4A,0x49,0x49,0x30}}, {'7',{0x01,0x71,0x09,0x05,0x03}},
+    {'8',{0x36,0x49,0x49,0x49,0x36}}, {'9',{0x06,0x49,0x49,0x29,0x1E}},
+    {'A',{0x7E,0x11,0x11,0x11,0x7E}}, {'D',{0x7F,0x41,0x41,0x22,0x1C}},
+    {'E',{0x7F,0x49,0x49,0x49,0x41}}, {'K',{0x7F,0x08,0x14,0x22,0x41}},
+    {'L',{0x7F,0x40,0x40,0x40,0x40}}, {'M',{0x7F,0x02,0x0C,0x02,0x7F}},
+    {'O',{0x3E,0x41,0x41,0x41,0x3E}}, {'R',{0x7F,0x09,0x19,0x29,0x46}},
+    {'S',{0x46,0x49,0x49,0x49,0x31}}, {'T',{0x01,0x01,0x7F,0x01,0x01}},
+    {'V',{0x1F,0x20,0x40,0x20,0x1F}}, {':',{0,0x36,0x36,0,0}},
+    {'.',{0,0x60,0x60,0,0}}, {' ',{0,0,0,0,0}}
+};
+
+void OLED_ShowString(uint8_t x, uint8_t y_page, const char *text)
+{
+    if (text == NULL || y_page > 6U) return;
+    while (*text != '\0' && x <= 116U) {
+        const uint8_t *glyph = font[sizeof(font)/sizeof(font[0])-1U].col;
+        uint32_t i;
+        uint8_t col, bit;
+        for (i = 0; i < sizeof(font)/sizeof(font[0]); ++i) {
+            if (font[i].c == *text) { glyph = font[i].col; break; }
+        }
+        for (col = 0; col < 5U; ++col) {
+            uint16_t expanded = 0;
+            for (bit = 0; bit < 7U; ++bit) {
+                if (glyph[col] & (1U << bit)) expanded |= (uint16_t)(3U << (2U * bit));
+            }
+            framebuffer[y_page][x+2U*col] = (uint8_t)expanded;
+            framebuffer[y_page][x+2U*col+1U] = (uint8_t)expanded;
+            framebuffer[y_page+1U][x+2U*col] = (uint8_t)(expanded >> 8);
+            framebuffer[y_page+1U][x+2U*col+1U] = (uint8_t)(expanded >> 8);
+        }
+        framebuffer[y_page][x+10U] = framebuffer[y_page][x+11U] = 0;
+        framebuffer[y_page+1U][x+10U] = framebuffer[y_page+1U][x+11U] = 0;
+        x += 12U;
+        ++text;
+    }
+}
+
+void OLED_Show8x16Char(uint8_t x, uint8_t y_page, const uint8_t *data)
+{
+    if (data == NULL || y_page > 6U || x > 120U) return;
+    memcpy(&framebuffer[y_page][x], data, 8U);
+    memcpy(&framebuffer[y_page+1U][x], data+8U, 8U);
+}
+void OLED_Show16x16Char(uint8_t x, uint8_t y_page, const uint8_t *data)
+{
+    if (data == NULL || y_page > 6U || x > 112U) return;
+    memcpy(&framebuffer[y_page][x], data, 16U);
+    memcpy(&framebuffer[y_page+1U][x], data+16U, 16U);
+}
+
+/* ===== 项目专属扩展区：换项目时修改下面的字模和标签。===== */
+/* 每个 16x16 汉字占 32 字节；顺序：正、常、警、报、温、敏、输、出、光。 */
+static const uint8_t oled_cn_glyphs[9][32] = {
+    { 0x00, 0x02, 0x02, 0xE2, 0x02, 0x02, 0x02, 0x02, 0xFE, 0x42, 0x42, 0x42, 0x42, 0x42, 0x02, 0x00,
+      0x00, 0x30, 0x30, 0x3F, 0x30, 0x30, 0x30, 0x30, 0x3F, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x00 },
+    { 0x00, 0x38, 0x38, 0x0A, 0xEC, 0x28, 0x28, 0x2E, 0x2E, 0x28, 0x28, 0xEC, 0x0A, 0x08, 0x38, 0x00,
+      0x00, 0x00, 0x7C, 0x7C, 0x05, 0x05, 0x05, 0x05, 0x7F, 0x05, 0x45, 0x45, 0x64, 0x3C, 0x00, 0x00 },
+    { 0x00, 0x12, 0x7A, 0x5E, 0x5A, 0x7A, 0x4E, 0xBA, 0xD8, 0x4C, 0x5E, 0x34, 0x34, 0x4C, 0x44, 0x00,
+      0x00, 0x01, 0x01, 0x7B, 0x5B, 0x5B, 0x5B, 0x5B, 0x5B, 0x5B, 0x5B, 0x5B, 0x7B, 0x01, 0x01, 0x00 },
+    { 0x00, 0x10, 0x10, 0xFE, 0x10, 0x10, 0x00, 0xFE, 0x82, 0x82, 0xA2, 0xA2, 0xA2, 0x9E, 0x80, 0x00,
+      0x00, 0x42, 0x42, 0x7F, 0x01, 0x01, 0x00, 0x7F, 0x40, 0x43, 0x2C, 0x18, 0x3C, 0x67, 0x40, 0x00 },
+    { 0x00, 0x20, 0x42, 0xC6, 0x04, 0x00, 0x7E, 0x52, 0x52, 0x52, 0x52, 0x52, 0x52, 0x7E, 0x00, 0x00,
+      0x00, 0x40, 0x30, 0x0E, 0x44, 0x7E, 0x7E, 0x42, 0x7E, 0x42, 0x42, 0x7E, 0x42, 0x7E, 0x40, 0x00 },
+    { 0x20, 0x30, 0xEE, 0x26, 0xE4, 0x24, 0x24, 0xE4, 0xC4, 0x70, 0xDE, 0x10, 0x10, 0xF0, 0x10, 0x00,
+      0x00, 0x19, 0x1F, 0x13, 0x5D, 0x59, 0x7F, 0x13, 0x51, 0x60, 0x33, 0x1E, 0x1F, 0x21, 0x40, 0x00 },
+    { 0xCC, 0xBC, 0xEE, 0xEC, 0xAC, 0x10, 0x90, 0x98, 0x94, 0x92, 0x16, 0x98, 0x18, 0xD0, 0x10, 0x00,
+      0x09, 0x09, 0x7F, 0x7F, 0x05, 0x00, 0x7F, 0x0A, 0x4A, 0x7F, 0x00, 0x5F, 0x40, 0x7F, 0x00, 0x00 },
+    { 0x00, 0x00, 0xFC, 0xFC, 0xC0, 0xC0, 0xC0, 0xFE, 0xFE, 0xC0, 0xC0, 0xC0, 0xFC, 0xFC, 0x00, 0x00,
+      0x00, 0x00, 0x3E, 0x20, 0x20, 0x20, 0x20, 0x3F, 0x3F, 0x20, 0x20, 0x20, 0x20, 0x7E, 0x00, 0x00 },
+    { 0x00, 0x80, 0x82, 0x8C, 0xB8, 0x80, 0x80, 0xFE, 0xFE, 0x80, 0x80, 0xB0, 0x8C, 0x86, 0x80, 0x00,
+      0x00, 0x40, 0x60, 0x20, 0x18, 0x0F, 0x00, 0x00, 0x00, 0x3F, 0x7F, 0x40, 0x40, 0x48, 0x70, 0x00 },
+};
+/* 新增标签时，同步修改 oled.h 的枚举、这里的字模以及 labels/lengths。 */
+void OLED_ShowLabel(uint8_t x, uint8_t y_page, OLED_Label label)
+{
+    static const uint8_t labels[][4] = {
+        {0U, 1U, 0U, 0U}, /* normal: 正常 */
+        {2U, 3U, 0U, 0U}, /* alarm: 警报 */
+        {4U, 5U, 6U, 7U}, /* temperature output: 温敏输出 */
+        {8U, 5U, 6U, 7U}  /* light output: 光敏输出 */
+    };
+    static const uint8_t lengths[] = {2U, 2U, 4U, 4U};
+    uint8_t i;
+
+    if ((uint32_t)label >= sizeof(lengths) || y_page > 6U ||
+        x > (uint8_t)(128U - 16U * lengths[label])) return;
+    for (i = 0U; i < lengths[label]; ++i) {
+        OLED_Show16x16Char((uint8_t)(x + 16U * i), y_page,
+                          oled_cn_glyphs[labels[label][i]]);
+    }
+}
+
+/* This project's three-line display; replace it for another project's UI. */
+void OLED_ShowSurveyScreen(uint8_t alarm_test, uint8_t temp_output,
+                           float light_voltage)
+{
+    char temp_text[] = "0";
+    char light_text[] = "0.00V";
+    uint32_t millivolts;
+
+    OLED_Clear();
+    if (alarm_test) OLED_ShowString(0U, 0U, "TEST");
+    else OLED_ShowLabel(0U, 0U,
+                        temp_output ? OLED_LABEL_ALARM : OLED_LABEL_NORMAL);
+
+    OLED_ShowLabel(0U, 2U, OLED_LABEL_TEMP_OUTPUT);
+    temp_text[0] = temp_output ? '1' : '0';
+    OLED_ShowString(64U, 2U, temp_text);
+
+    millivolts = (uint32_t)(light_voltage * 1000.0f + 0.5f);
+    if (millivolts > 3300U) millivolts = 3300U;
+    light_text[0] = (char)('0' + millivolts / 1000U);
+    light_text[2] = (char)('0' + (millivolts / 100U) % 10U);
+    light_text[3] = (char)('0' + (millivolts / 10U) % 10U);
+    OLED_ShowLabel(0U, 4U, OLED_LABEL_LIGHT_OUTPUT);
+    OLED_ShowString(64U, 4U, light_text);
+    OLED_Update();
+}

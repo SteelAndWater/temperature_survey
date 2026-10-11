@@ -1,0 +1,11 @@
+# C 源码、头文件和 Markdown 文档统一使用 LF 换行。
+*.c text eol=lf
+*.h text eol=lf
+*.md text eol=lf
+
+# 嘉立创 EDA 专业版使用 LF 分隔记录，保持客户端可读的换行格式。
+*.esch2 text eol=lf
+*.ecfg text eol=lf
+*.evar text eol=lf
+*.epcb2 text eol=lf
+*.epan2 text eol=lf

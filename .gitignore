@@ -1,0 +1,11 @@
+# Keil build products: rebuild from source before flashing.
+/firmware/MDK-ARM/source_code/
+/firmware/MDK-ARM/*.lst
+
+# Machine-specific Keil session and debugger settings.
+/firmware/MDK-ARM/*.uvoptx
+/firmware/MDK-ARM/*.uvguix.*
+/firmware/MDK-ARM/DebugConfig/
+
+# Word lock files.
+~$*.docx

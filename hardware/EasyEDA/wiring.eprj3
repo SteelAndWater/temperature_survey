@@ -1,0 +1,67 @@
+{
+  "name": "wiring",
+  "owner_uuid": "1dfe2dd8f42d4d7db5be6a7c1a254af4",
+  "creator_uuid": "1dfe2dd8f42d4d7db5be6a7c1a254af4",
+  "created_at": "2026-10-10 11:00:12",
+  "updated_at": "2026-10-10 11:00:12",
+  "modifier_uuid": "1dfe2dd8f42d4d7db5be6a7c1a254af4",
+  "content": "",
+  "archive": false,
+  "cbb_project": 0,
+  "thumb": "",
+  "ticket": 1,
+  "g_ticket": 1,
+  "boards": [],
+  "block_symbol_attrs_groups": {},
+  "default_sheet": "30958d7b7272b48d",
+  "branch_uuid": "",
+  "pcb_count": 0,
+  "format": "folder",
+  "config": {
+    "defaultSheet": "30958d7b7272b48d",
+    "settings": {}
+  },
+  "profile": {
+    "boards": {
+      "1f20d0a96428b39e": {
+        "uuid": "1f20d0a96428b39e",
+        "title": "接线图",
+        "zIndex": 1
+      },
+      "81fab0eb83df6eab": {
+        "uuid": "81fab0eb83df6eab",
+        "title": "Board1",
+        "zIndex": 2
+      }
+    },
+    "schematics": {
+      "6ac17a732143d74d": {
+        "uuid": "6ac17a732143d74d",
+        "name": "接线图",
+        "board": "1f20d0a96428b39e",
+        "source": "",
+        "version": "1791645696016",
+        "updateTime": 1791645696016
+      }
+    },
+    "sheets": {
+      "30958d7b7272b48d": {
+        "uuid": "30958d7b7272b48d",
+        "title": "接线图",
+        "schematic_uuid": "6ac17a732143d74d",
+        "zIndex": 1,
+        "source": "",
+        "version": "1791645696016",
+        "updateTime": 1791645696016
+      }
+    },
+    "pcbs": {},
+    "panels": {},
+    "blockSymbols": {},
+    "owner": {
+      "uuid": "1dfe2dd8f42d4d7db5be6a7c1a254af4"
+    },
+    "simSchematics": {},
+    "simulations": {}
+  }
+}
